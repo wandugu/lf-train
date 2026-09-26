@@ -29,5 +29,5 @@ save_safetensors: true            # 权衡安全
 # wandb
 report_to: wandb
 run_name: rams_sft
-wandb_project: rams-irl
+wandb_project: rams-ecpo
 wandb_tags: sft,qwen3-4b,rams

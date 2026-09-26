@@ -1,6 +1,6 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""将 MAVEN 系列原始 JSON 转换为 SKIRL-RL 所需的五类下游文件。
+"""将 MAVEN 系列原始 JSON 转换为 ECPO 所需的五类下游文件。
 
 脚本逻辑概览：
 1. 读取 ``data/maven_raw`` 下的 JSON 文档或 ``train/valid/test.jsonl`` 拆分，并结合映射表构造 ``event.jsonl``。
@@ -19,6 +19,7 @@ import json
 import logging
 import random
 from collections import defaultdict
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
@@ -31,7 +32,7 @@ if __package__ is None or __package__ == "":
 
     sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from skirl_rl.convert.common import (
+from ecpo_rl.convert.common import (
     DatasetStats,
     EventArgument,
     EventConfidence,
@@ -50,6 +51,12 @@ from skirl_rl.convert.common import (
     ensure_dir,
     write_dataset_info,
     write_jsonl,
+)
+from ecpo_rl.ecpo import (
+    ECPO_STAGES,
+    build_policy_output,
+    build_window_from_trajectories,
+    normalize_stage,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -368,7 +375,7 @@ def compute_delta_days(prev: Optional[str], current: str) -> int:
 
 def classify_label(skeleton_seq: List[str]) -> str:
     hits = set(skeleton_seq)
-    if {"PREP", "PROBE", "EXECUTE", "CASHOUT"}.issubset(hits):
+    if {"PREP", "PROBE", "EXECUTE", "OUTCOME"}.issubset(hits):
         return "expert"
     if len(hits) >= 2 and "EXECUTE" in hits:
         return "candidate"
@@ -386,7 +393,7 @@ AGENT_ROLE_KEYWORDS = {
 }
 
 
-SKELETON_STAGE_ORDER = ["PREP", "PROBE", "EXECUTE", "CASHOUT"]
+SKELETON_STAGE_ORDER = ["PREP", "PROBE", "EXECUTE", "OUTCOME"]
 PREP_KEYWORDS = {
     "plan",
     "prepare",
@@ -451,7 +458,7 @@ EXECUTE_KEYWORDS = {
     "catastrophe",
     "violence",
 }
-CASHOUT_KEYWORDS = {
+OUTCOME_KEYWORDS = {
     "loot",
     "cashout",
     "withdraw",
@@ -504,8 +511,8 @@ def infer_skeleton_from_type(event_type: str) -> List[str]:
     hits: List[str] = []
     if any(keyword in event_type_lower for keyword in EXECUTE_KEYWORDS):
         hits.append("EXECUTE")
-    if any(keyword in event_type_lower for keyword in CASHOUT_KEYWORDS):
-        hits.append("CASHOUT")
+    if any(keyword in event_type_lower for keyword in OUTCOME_KEYWORDS):
+        hits.append("OUTCOME")
     if any(keyword in event_type_lower for keyword in PROBE_KEYWORDS):
         hits.insert(0, "PROBE")
     if any(keyword in event_type_lower for keyword in PREP_KEYWORDS):
@@ -715,7 +722,7 @@ def build_preference_pairs(
             PreferencePair(
                 better=traj.trajectory_id,
                 worse=mutated.trajectory_id,
-                reason="more complete EXECUTE→CASHOUT chain",
+                reason="more complete EXECUTE->OUTCOME chain",
             )
         )
     LOGGER.info("生成偏好对 %d 组。", len(pairs))
@@ -980,38 +987,93 @@ def build_sft_samples(
     return samples, grouped
 
 
+def _format_ecpo_window_prompt(window) -> str:
+    lines = [
+        f"[WINDOW] {window.window_id}",
+        f"[INTENT] {window.intent_id}",
+        "[SKELETON] " + " -> ".join(window.skeleton_steps),
+        "[CANDIDATES]",
+    ]
+    for candidate_id in window.candidate_ids:
+        traj = window.trajectories[candidate_id]
+        lines.append(f"- candidate_id={candidate_id}")
+        for step in traj.get("steps", []):
+            roles_str = ", ".join(f"{k}:{v}" for k, v in step.get("roles", {}).items())
+            skeleton_str = ",".join(normalize_stage(item) for item in step.get("skeleton_hits", [])) or "PREP"
+            refs = ";".join(f"{ref.get('doc_id')}:{ref.get('span')}" for ref in step.get("text_refs", []))
+            lines.append(
+                f"  * event_id={step.get('event_id')} time={step.get('time')} type={step.get('type')} "
+                f"roles={{{roles_str}}} skeleton={skeleton_str} evidence={refs}"
+            )
+    lines.extend(
+        [
+            "[OUTPUT]",
+            "Return strict JSON only with keys: window_id, topk, certificates.",
+            "topk must contain window-local candidate_id values only.",
+            "certificates must align by rank position and include one step per skeleton stage.",
+            "Each matched step cites doc_id/span evidence; unmatched steps use matched=false, event_id=null, evidence=[].",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _reference_rank(candidate_ids: List[str], trajectories: Dict[str, Dict[str, object]]) -> List[str]:
+    label_rank = {"expert": 2, "candidate": 1, "negative": 0}
+    return sorted(
+        candidate_ids,
+        key=lambda cid: (
+            -label_rank.get(str(trajectories[cid].get("label", "candidate")), 1),
+            -len(trajectories[cid].get("steps", [])),
+            cid,
+        ),
+    )
+
+
 def build_rl_prompts(trajectories: List[TrajectoryEntry]) -> List[RLPrompt]:
     prompts: List[RLPrompt] = []
-    for traj in trajectories:
-        if len(traj.steps) < 2:
+    rng = random.Random(42)
+    sorted_trajs = sorted(trajectories, key=lambda item: item.trajectory_id)
+    window_size = 10
+    for window_idx, start in enumerate(range(0, len(sorted_trajs), window_size), start=1):
+        chunk = sorted_trajs[start : start + window_size]
+        if not chunk:
             continue
-        for idx in range(1, len(traj.steps)):
-            prefix = traj.steps[:idx]
-            next_step = traj.steps[idx]
-            prefix_lines = []
-            for step in prefix:
-                roles_str = ", ".join(f"{k}:{v}" for k, v in step.roles.items())
-                skeleton_str = ",".join(step.skeleton_hits) or "PREP"
-                prefix_lines.append(
-                    f"* {step.time} {step.type} roles={{{roles_str}}} skeleton={skeleton_str}"
-                )
-            prompt = (
-                f"[PERSON] {traj.person_id}\n"
-                f"[TRAJ] {traj.trajectory_id}\n\n"
-                + "\n".join(prefix_lines)
-                + "\n请预测下一步骨架动作与核心论元。"
+        shuffled = list(chunk)
+        rng.shuffle(shuffled)
+        localized: List[Dict[str, object]] = []
+        candidate_map: Dict[str, str] = {}
+        for local_idx, traj in enumerate(shuffled, start=1):
+            candidate_id = f"C{local_idx:03d}"
+            payload = traj.model_dump()
+            payload["candidate_id"] = candidate_id
+            localized.append(payload)
+            candidate_map[candidate_id] = traj.trajectory_id
+
+        window_id = f"maven_window_{window_idx:05d}"
+        window = build_window_from_trajectories(
+            localized,
+            window_id=window_id,
+            intent_id="MAVEN-ERE",
+            skeleton_steps=ECPO_STAGES,
+        )
+        ranked_ids = _reference_rank(window.candidate_ids, window.trajectories)
+        response = json.dumps(build_policy_output(window, ranked_ids, k=10), ensure_ascii=False)
+        top_candidate = ranked_ids[0] if ranked_ids else window.candidate_ids[0]
+        source_traj_id = candidate_map.get(top_candidate, chunk[0].trajectory_id)
+        prompts.append(
+            RLPrompt(
+                prompt=_format_ecpo_window_prompt(window),
+                response=response,
+                trajectory_id=source_traj_id,
+                person_id=chunk[0].person_id,
+                window_id=window.window_id,
+                intent_id=window.intent_id,
+                candidate_ids=window.candidate_ids,
+                candidate_map=candidate_map,
+                skeleton_steps=window.skeleton_steps,
             )
-            skeleton_str = ",".join(next_step.skeleton_hits) or "PREP"
-            response = f"{next_step.type or 'Unknown'} | skeleton={skeleton_str}"
-            prompts.append(
-                RLPrompt(
-                    prompt=prompt,
-                    response=response,
-                    trajectory_id=traj.trajectory_id,
-                    person_id=traj.person_id,
-                )
-            )
-    LOGGER.info("构造 RL 提示 %d 条。", len(prompts))
+        )
+    LOGGER.info("构造 ECPO RL 窗口提示 %d 条。", len(prompts))
     return prompts
 
 
@@ -1021,7 +1083,7 @@ def build_rl_prompts(trajectories: List[TrajectoryEntry]) -> List[RLPrompt]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Convert MAVEN raw JSON to processed SKIRL datasets")
+    parser = argparse.ArgumentParser(description="Convert MAVEN raw JSON to processed ECPO datasets")
     parser.add_argument("--src", type=Path, default=DEFAULT_SRC, help="原始 JSON 目录")
     parser.add_argument("--dst", type=Path, default=DEFAULT_DST, help="输出目录")
     args = parser.parse_args()
@@ -1079,7 +1141,7 @@ def main() -> None:
             },
             "maven_rl": {
                 "file_name": "rl_prompts.jsonl",
-                "formatting": "skirl_rl",
+                "formatting": "ecpo_rl",
                 "columns": {"prompt": "prompt", "response": "response"},
             },
         },

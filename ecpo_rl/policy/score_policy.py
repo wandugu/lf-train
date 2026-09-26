@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
-"""Score trajectories using reward model and policy log-probs."""
+﻿# -*- coding: utf-8 -*-
+"""Score trajectories and emit ECPO ranking/certificate outputs."""
 
 from __future__ import annotations
 
@@ -14,9 +14,23 @@ if __package__ is None or __package__ == "":
     import sys
     from pathlib import Path
 
-    sys.path.append(str(Path(__file__).resolve().parents[1]))
-    from irl.maxent_irl import MaxEntIRL  # type: ignore
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
+    from ecpo_rl.ecpo import (  # type: ignore
+        DeterministicEvidenceVerifier,
+        ECPOValidator,
+        build_policy_output,
+        build_window_from_trajectories,
+        evaluate_certified_output,
+    )
+    from ecpo_rl.irl.maxent_irl import MaxEntIRL  # type: ignore
 else:
+    from ..ecpo import (
+        DeterministicEvidenceVerifier,
+        ECPOValidator,
+        build_policy_output,
+        build_window_from_trajectories,
+        evaluate_certified_output,
+    )
     from ..irl.maxent_irl import MaxEntIRL
 
 
@@ -77,7 +91,6 @@ def summarise_reason(traj: Dict, reward: float, logprob: float) -> Dict:
 
 def evaluate_ranking(ranked: List[Tuple[str, float]], trajectories: List[Dict], k: int) -> Dict[str, float]:
     relevance_map = {traj["trajectory_id"]: {"expert": 2, "candidate": 1, "negative": 0}[traj.get("label", "candidate")] for traj in trajectories}
-    scores = []
     hits = 0
     dcg = 0.0
     idcg = 0.0
@@ -104,7 +117,7 @@ def evaluate_ranking(ranked: List[Tuple[str, float]], trajectories: List[Dict], 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Rank trajectories with reward model")
+    parser = argparse.ArgumentParser(description="Rank trajectories and emit ECPO certificates")
     parser.add_argument("--traj-path", type=Path, default=Path("data/processed/traj.jsonl"))
     parser.add_argument("--reward-ckpt", type=Path, default=Path("outputs/qwen-4b-rm/reward.ckpt"))
     parser.add_argument("--policy-logprobs", type=Path, default=Path("outputs/qwen-4b-rl/policy_logprobs.json"))
@@ -138,17 +151,33 @@ def main() -> None:
 
     combined_scores.sort(key=lambda x: x[1], reverse=True)
     topk = combined_scores[: args.k]
+    window = build_window_from_trajectories(
+        trajectories,
+        window_id="score_window",
+        intent_id="ECPO",
+    )
+    ecpo_output = build_policy_output(window, [traj_id for traj_id, _score in combined_scores], args.k)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "topk.json").write_text(json.dumps([{"trajectory_id": traj_id, "score": score} for traj_id, score in topk], ensure_ascii=False, indent=2), encoding="utf-8")
+    (args.output_dir / "ecpo_output.json").write_text(json.dumps(ecpo_output, ensure_ascii=False, indent=2), encoding="utf-8")
     with (args.output_dir / "reasons.jsonl").open("w", encoding="utf-8") as f:
         for reason in reasons:
             f.write(json.dumps(reason, ensure_ascii=False) + "\n")
 
     print(f"Top-{args.k} trajectories written to {args.output_dir / 'topk.json'}")
+    print(f"ECPO ranking/certificate output written to {args.output_dir / 'ecpo_output.json'}")
 
     if args.eval:
         metrics = evaluate_ranking(combined_scores, trajectories, args.k)
+        certified = evaluate_certified_output(
+            ecpo_output,
+            window,
+            ECPOValidator(k=args.k),
+            DeterministicEvidenceVerifier(),
+            args.k,
+        )
+        metrics.update(certified)
         print(json.dumps(metrics, ensure_ascii=False))
 
 

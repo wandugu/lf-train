@@ -29,5 +29,5 @@ save_safetensors: true            # 权衡安全
 #wandb
 report_to: wandb
 run_name: maven_sft
-wandb_project: maven-irl
+wandb_project: maven-ecpo
 wandb_tags: sft,qwen3-4b,maven

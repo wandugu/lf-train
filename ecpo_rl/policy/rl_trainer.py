@@ -1,9 +1,9 @@
-# -*- coding: utf-8 -*-
-"""Fallback RL trainer for environments without PPO/GRPO support.
+﻿# -*- coding: utf-8 -*-
+"""Fallback ECPO trainer for environments without PPO/GRPO support.
 
-This module simulates a PPO loop using heuristic updates so that the demo can run
-fully offline.  When LlamaFactory provides PPO/GRPO, prefer invoking the official
-CLI with ``configs/ppo_rl.yaml`` instead of this script.
+This module simulates the ECPO reward loop so that the demo can run fully
+offline.  When LlamaFactory provides PPO/GRPO, prefer invoking the official CLI
+with ``configs/ppo_rl.yaml`` instead of this script.
 """
 
 from __future__ import annotations
@@ -20,22 +20,36 @@ if __package__ is None or __package__ == "":
     import sys
     from pathlib import Path
 
-    sys.path.append(str(Path(__file__).resolve().parents[1]))
-    from irl.maxent_irl import MaxEntIRL  # type: ignore
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
+    from ecpo_rl.ecpo import build_policy_output  # type: ignore
+    from ecpo_rl.ecpo.reward import ECPORewardCalculator  # type: ignore
 else:
-    from ..irl.maxent_irl import MaxEntIRL
+    from ..ecpo import build_policy_output
+    from ..ecpo.reward import ECPORewardCalculator
 
 
 LOGGER = logging.getLogger(__name__)
 
 
 class HeuristicRLTrainer:
-    def __init__(self, reward_ckpt: Path, prompts_path: Path, output_dir: Path, alpha: float = 0.6) -> None:
-        self.reward_model = MaxEntIRL()
-        self.reward_model.load(reward_ckpt)
+    def __init__(
+        self,
+        reward_ckpt: Path,
+        trajectory_path: Path,
+        prompts_path: Path,
+        output_dir: Path,
+        alpha: float = 0.6,
+        k: int = 10,
+    ) -> None:
+        del alpha
+        self.reward_model = ECPORewardCalculator(
+            reward_ckpt=reward_ckpt,
+            trajectory_path=trajectory_path,
+            k=k,
+        )
         self.prompts_path = prompts_path
         self.output_dir = output_dir
-        self.alpha = alpha
+        self.k = k
 
     def load_prompts(self) -> List[Dict]:
         prompts: List[Dict] = []
@@ -47,22 +61,21 @@ class HeuristicRLTrainer:
         return prompts
 
     def simulate_policy(self, prompt: Dict) -> Dict[str, float]:
-        # Score the target response using reward features as a proxy
-        traj_stub = {
-            "trajectory_id": prompt.get("trajectory_id"),
-            "steps": [
-                {
-                    "skeleton_hits": [prompt.get("response", "EXECUTE")],
-                    "delta_days_from_prev": 0,
-                    "roles": {"Agent": "P_SIM"},
-                    "time": "2014-03-21",
-                }
-            ],
-            "meta": {"graph_nodes": ["P_SIM"], "graph_edges": []},
-        }
-        reward = self.reward_model.score(traj_stub)
-        logprob = np.tanh(reward)
-        return {"reward": reward, "logprob": float(logprob)}
+        meta = dict(prompt.get("_meta") or {})
+        for key in ("trajectory_id", "person_id", "window_id", "intent_id", "candidate_ids", "candidate_map", "skeleton_steps"):
+            if key in prompt and key not in meta:
+                meta[key] = prompt[key]
+
+        try:
+            window = self.reward_model.build_window_for_meta(meta)
+            ranked_ids = list(window.candidate_ids)
+            response = json.dumps(build_policy_output(window, ranked_ids, self.k), ensure_ascii=False)
+            reward, details = self.reward_model.score_response(response, meta)
+            LOGGER.debug("offline ECPO details: %s", details)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("offline ECPO simulation failed for %s: %s", prompt.get("trajectory_id"), exc)
+            reward = 0.0
+        return {"reward": reward, "logprob": float(np.tanh(reward))}
 
     def train(self) -> None:
         prompts = self.load_prompts()
@@ -79,7 +92,7 @@ class HeuristicRLTrainer:
                 response_text or "<empty>",
             )
             simulation = self.simulate_policy(prompt)
-            combined = self.alpha * simulation["reward"] + (1 - self.alpha) * simulation["logprob"]
+            combined = simulation["reward"]
             policy_logprobs[prompt["trajectory_id"]] = combined
             stats.append(combined)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -90,17 +103,26 @@ class HeuristicRLTrainer:
 
 
 def build_argparser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Heuristic PPO trainer (offline demo)")
+    parser = argparse.ArgumentParser(description="Heuristic ECPO trainer (offline demo)")
     parser.add_argument("--reward-ckpt", type=Path, required=True)
+    parser.add_argument("--trajectory-path", type=Path, required=True)
     parser.add_argument("--prompts", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--alpha", type=float, default=0.6)
+    parser.add_argument("--k", type=int, default=10)
     return parser
 
 
 def main() -> None:
     args = build_argparser().parse_args()
-    trainer = HeuristicRLTrainer(args.reward_ckpt, args.prompts, args.output_dir, alpha=args.alpha)
+    trainer = HeuristicRLTrainer(
+        args.reward_ckpt,
+        args.trajectory_path,
+        args.prompts,
+        args.output_dir,
+        alpha=args.alpha,
+        k=args.k,
+    )
     trainer.train()
 
 

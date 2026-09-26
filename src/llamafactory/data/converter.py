@@ -1,4 +1,4 @@
-# Copyright 2025 the LlamaFactory team.
+﻿# Copyright 2025 the LlamaFactory team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -368,8 +368,8 @@ class OpenAIDatasetConverter(DatasetConverter):
 
 
 @dataclass
-class SkirlRLDatasetConverter(AlpacaDatasetConverter):
-    """在 Alpaca 格式基础上附加 `_meta` 信息，供外部奖励回调使用。"""
+class ECPORLDatasetConverter(AlpacaDatasetConverter):
+    """在 Alpaca 格式基础上附加 `_meta` 信息，供 ECPO 奖励回调使用。"""
 
     def __call__(self, example: dict[str, Any]) -> dict[str, Any]:
         # 先提取我们关心的元信息，避免父类转换过程中意外丢失字段。
@@ -415,7 +415,7 @@ DATASET_CONVERTERS = {
     "alpaca": AlpacaDatasetConverter,
     "sharegpt": SharegptDatasetConverter,
     "openai": OpenAIDatasetConverter,
-    "skirl_rl": SkirlRLDatasetConverter,
+    "ecpo_rl": ECPORLDatasetConverter,
 }
 
 

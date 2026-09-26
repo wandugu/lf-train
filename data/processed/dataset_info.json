@@ -12,7 +12,7 @@
   },
   "maven_rl": {
     "file_name": "rl_prompts.jsonl",
-    "formatting": "skirl_rl",
+    "formatting": "ecpo_rl",
     "columns": {
       "prompt": "prompt",
       "response": "response"
@@ -31,7 +31,7 @@
   },
   "rams_rl": {
     "file_name": "rams_rl_prompts.jsonl",
-    "formatting": "skirl_rl",
+    "formatting": "ecpo_rl",
     "columns": {
       "prompt": "prompt",
       "response": "response"

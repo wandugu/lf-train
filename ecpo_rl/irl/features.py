@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Feature engineering utilities for SKIRL-RL maximum entropy IRL."""
+"""Feature engineering utilities for ECPO trajectory reward learning."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def build_skeleton_features(trajectory: Dict) -> np.ndarray:
     The feature vector encodes:
 
     1. mean skeleton hits per step
-    2. coverage of canonical phases (PREP, PROBE, EXECUTE, CASHOUT)
+    2. coverage of canonical phases (PREP, PROBE, EXECUTE, OUTCOME)
     3. penalty for missing EXECUTE phase
     4. temporal coherence penalty (based on delta days)
     """
@@ -35,12 +35,13 @@ def build_skeleton_features(trajectory: Dict) -> np.ndarray:
     skeleton_counts = [len(step.get("skeleton_hits", [])) for step in steps]
     mean_hits = float(np.mean(skeleton_counts))
 
-    canonical = ["PREP", "PROBE", "EXECUTE", "CASHOUT"]
+    canonical = ["PREP", "PROBE", "EXECUTE", "OUTCOME"]
     hits = {phase: 0 for phase in canonical}
     for step in steps:
         for token in step.get("skeleton_hits", []):
-            if token in hits:
-                hits[token] += 1
+            stage = "OUTCOME" if token == "CASHOUT" else token
+            if stage in hits:
+                hits[stage] += 1
     coverage = sum(1 for v in hits.values() if v > 0) / len(canonical)
     missing_execute = 1.0 if hits["EXECUTE"] == 0 else 0.0
 

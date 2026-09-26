@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
-"""Evaluate SKIRL-RL ranking metrics for SKEIN tables."""
+﻿# -*- coding: utf-8 -*-
+"""Evaluate ECPO ranking and certificate metrics."""
 
 from __future__ import annotations
 
@@ -15,10 +15,17 @@ if __package__ is None or __package__ == "":
     import sys
 
     sys.path.append(str(Path(__file__).resolve().parents[1]))
-    from skirl_rl.config_utils import resolve_mode  # type: ignore
-    from skirl_rl.irl.features import build_feature_vector  # type: ignore
-    from skirl_rl.irl.maxent_irl import MaxEntIRL  # type: ignore
-    from skirl_rl.policy.score_policy import (  # type: ignore
+    from ecpo_rl.ecpo import (  # type: ignore
+        DeterministicEvidenceVerifier,
+        ECPOValidator,
+        build_policy_output,
+        build_window_from_trajectories,
+        evaluate_certified_output,
+    )
+    from ecpo_rl.config_utils import resolve_mode  # type: ignore
+    from ecpo_rl.irl.features import build_feature_vector  # type: ignore
+    from ecpo_rl.irl.maxent_irl import MaxEntIRL  # type: ignore
+    from ecpo_rl.policy.score_policy import (  # type: ignore
         evaluate_ranking,
         heuristic_policy_logprob,
         load_policy_logprobs,
@@ -27,6 +34,13 @@ if __package__ is None or __package__ == "":
         summarise_reason,
     )
 else:
+    from .ecpo import (
+        DeterministicEvidenceVerifier,
+        ECPOValidator,
+        build_policy_output,
+        build_window_from_trajectories,
+        evaluate_certified_output,
+    )
     from .config_utils import resolve_mode
     from .irl.features import build_feature_vector
     from .irl.maxent_irl import MaxEntIRL
@@ -76,6 +90,7 @@ def _build_sample_trajectory() -> Dict:
         "label": "expert",
         "steps": [
             {
+                "event_id": "event_sample_1",
                 "skeleton_hits": ["PREP", "EXECUTE"],
                 "delta_days_from_prev": 0,
                 "roles": {"Agent": "A_SAMPLE", "Target": "T_SAMPLE"},
@@ -94,7 +109,15 @@ def _ensure_sample_assets(root: Path, cfg: Dict) -> Dict[str, Path]:
     sample_logprobs = _resolve_path(root, cfg["sample_policy_logprobs"])
     sample_dir.mkdir(parents=True, exist_ok=True)
 
-    if not sample_traj.exists():
+    rewrite_sample_traj = not sample_traj.exists()
+    if sample_traj.exists():
+        try:
+            first = json.loads(sample_traj.read_text(encoding="utf-8").splitlines()[0])
+            rewrite_sample_traj = not first.get("steps", [{}])[0].get("event_id")
+        except Exception:  # noqa: BLE001
+            rewrite_sample_traj = True
+
+    if rewrite_sample_traj:
         traj_payload = _build_sample_trajectory()
         sample_traj.write_text(json.dumps(traj_payload, ensure_ascii=False) + "\n", encoding="utf-8")
         LOGGER.debug("Sample trajectory written: %s", sample_traj)
@@ -146,17 +169,26 @@ def _score_trajectories(
     return combined_scores, reasons
 
 
-def _write_outputs(output_dir: Path, dataset: str, profile: str, topk: List[Tuple[str, float]], reasons: Iterable[Dict]) -> None:
+def _write_outputs(
+    output_dir: Path,
+    dataset: str,
+    profile: str,
+    topk: List[Tuple[str, float]],
+    reasons: Iterable[Dict],
+    ecpo_output: Dict,
+) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     topk_payload = [{"trajectory_id": traj_id, "score": score} for traj_id, score in topk]
     topk_path = output_dir / f"topk_{dataset}_{profile}.json"
     topk_path.write_text(json.dumps(topk_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    ecpo_path = output_dir / f"ecpo_output_{dataset}_{profile}.json"
+    ecpo_path.write_text(json.dumps(ecpo_output, ensure_ascii=False, indent=2), encoding="utf-8")
 
     reasons_path = output_dir / f"reasons_{dataset}_{profile}.jsonl"
     with reasons_path.open("w", encoding="utf-8") as f:
         for reason in reasons:
             f.write(json.dumps(reason, ensure_ascii=False) + "\n")
-    LOGGER.debug("Outputs written: %s, %s", topk_path, reasons_path)
+    LOGGER.debug("Outputs written: %s, %s, %s", topk_path, ecpo_path, reasons_path)
 
 
 def _resolve_profiles(config: Dict, names: Iterable[str]) -> Dict[str, Dict]:
@@ -214,9 +246,25 @@ def _evaluate_once(root: Path, cfg: Dict, dataset: str, profile: str, force_samp
     LOGGER.debug("Loaded %d trajectories", len(trajectories))
 
     combined_scores, reasons = _score_trajectories(trajectories, reward_ckpt, policy_logprobs, alpha)
+    window = build_window_from_trajectories(trajectories, window_id=f"{dataset}_{profile}", intent_id="ECPO")
+    ecpo_output = build_policy_output(window, [traj_id for traj_id, _score in combined_scores], k)
     metrics = evaluate_ranking(combined_scores, trajectories, k)
-    metrics_fmt = {"NDCG@10": metrics["NDCG@K"], "MAP": metrics["MAP@K"], "Hit@10": metrics["Hit@K"]}
-    _write_outputs(output_dir, dataset, profile, combined_scores[:k], reasons)
+    certified = evaluate_certified_output(
+        ecpo_output,
+        window,
+        ECPOValidator(k=k),
+        DeterministicEvidenceVerifier(),
+        k,
+    )
+    metrics_fmt = {
+        "NDCG@10": metrics["NDCG@K"],
+        "MAP": metrics["MAP@K"],
+        "Hit@10": metrics["Hit@K"],
+        "CertNDCG@10": certified["CertNDCG@K"],
+        "EvidCons@10": certified["EvidCons@K"],
+        "Feasible": certified["Feasible"],
+    }
+    _write_outputs(output_dir, dataset, profile, combined_scores[:k], reasons, ecpo_output)
     eval_path = output_dir / f"evaluation_{dataset}_{profile}.json"
     eval_path.write_text(json.dumps(metrics_fmt, ensure_ascii=False, indent=2), encoding="utf-8")
     LOGGER.debug("Metrics written: %s", eval_path)
@@ -224,8 +272,8 @@ def _evaluate_once(root: Path, cfg: Dict, dataset: str, profile: str, force_samp
 
 
 def build_argparser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Evaluate SKEIN ranking metrics")
-    parser.add_argument("--config", type=Path, default=Path("skirl_rl/config.yaml"))
+    parser = argparse.ArgumentParser(description="Evaluate ECPO ranking and certificate metrics")
+    parser.add_argument("--config", type=Path, default=Path("ecpo_rl/config.yaml"))
     parser.add_argument("--datasets", type=str, default=None)
     parser.add_argument("--profiles", type=str, default=None)
     parser.add_argument("--k", type=int, default=None)

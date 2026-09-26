@@ -2,6 +2,6 @@
   "Contact.Meet": ["PREP", "PROBE"],
   "Conflict.Protest": ["PREP", "PROBE", "EXECUTE"],
   "Conflict.Attack": ["PREP", "EXECUTE"],
-  "Conflict.Explosion": ["EXECUTE", "CASHOUT"],
-  "Movement.Transportation": ["PREP", "EXECUTE", "CASHOUT"]
+  "Conflict.Explosion": ["EXECUTE", "OUTCOME"],
+  "Movement.Transportation": ["PREP", "EXECUTE", "OUTCOME"]
 }

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Prompt builders for SKIRL-RL trajectory summarisation."""
+"""Prompt builders for ECPO trajectory and window serialisation."""
 
 from __future__ import annotations
 

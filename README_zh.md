@@ -40,6 +40,22 @@
 
 \[ [English](README.md) | 中文 \]
 
+## ECPO 流程
+
+本仓库包含用于证据认证候选排序的 ECPO 流程。ECPO 训练策略模型输出 strict JSON 联合对象，其中包含 `topk` 候选排序和按位置对齐的证据 `certificates`，并通过 listwise 排名收益、证书有效性和 evidence-cycle 恢复一致性进行奖励。
+
+快速入口：
+
+```bash
+python ecpo_rl/scripts/0_convert_maven_to_event_traj.py
+python ecpo_rl/scripts/0_convert_rams_to_event_traj.py
+bash ecpo_rl/scripts/2_train_reward_maxent.sh
+bash ecpo_rl/scripts/3_train_policy_rl.sh
+python ecpo_rl/evaluate_ecpo.py
+```
+
+完整的数据构造、训练、奖励回调和评估说明见 [ecpo_rl/README.md](ecpo_rl/README.md)。
+
 **微调大模型可以像这样轻松…**
 
 https://github.com/user-attachments/assets/43b700c6-a178-41db-b1f8-8190a5d3fcfc

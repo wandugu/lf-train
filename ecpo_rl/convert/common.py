@@ -140,6 +140,11 @@ class RLPrompt(BaseModel):
     response: str
     trajectory_id: str
     person_id: str
+    window_id: Optional[str] = None
+    intent_id: Optional[str] = None
+    candidate_ids: List[str] = Field(default_factory=list)
+    candidate_map: Dict[str, str] = Field(default_factory=dict)
+    skeleton_steps: List[str] = Field(default_factory=list)
 
 
 @dataclass
@@ -169,8 +174,13 @@ def write_jsonl(path: Path, records: Iterable[BaseModel | Dict]) -> DatasetStats
                 meta = {
                     "trajectory_id": payload.get("trajectory_id"),
                     "person_id": payload.get("person_id"),
+                    "window_id": payload.get("window_id"),
+                    "intent_id": payload.get("intent_id"),
+                    "candidate_ids": payload.get("candidate_ids"),
+                    "candidate_map": payload.get("candidate_map"),
+                    "skeleton_steps": payload.get("skeleton_steps"),
                 }
-                payload["_meta"] = {k: v for k, v in meta.items() if v is not None}
+                payload["_meta"] = {k: v for k, v in meta.items() if v}
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
     extra: Dict[str, object] = {}
     if path.name.endswith("event.jsonl"):

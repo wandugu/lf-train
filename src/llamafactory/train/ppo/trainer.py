@@ -605,6 +605,8 @@ class CustomPPOTrainer(PPOTrainer, Trainer):
                 ):
                     if isinstance(meta, dict):
                         meta.setdefault("prompt", prompt_text)
+                        meta.setdefault("response", response_text)
+                        meta.setdefault("raw_response", response_text)
                         if "trajectory_id" not in meta:
                             match = re.search(r"\[TRAJ\]\s*([^\s]+)", prompt_text)
                             if match:

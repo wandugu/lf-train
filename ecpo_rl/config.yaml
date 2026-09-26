@@ -53,9 +53,9 @@ data:
         reward_ckpt: /root/autodl-tmp/qwen-4b-maven-rm/reward.ckpt
         policy_output_dir: /root/autodl-tmp/qwen-4b-rl
       wandb:
-        project: maven-irl
+        project: maven-ecpo
         sft_tags: sft,qwen3-4b,maven
-        ppo_tags: ppo,qwen3-4b,maven
+        ppo_tags: ecpo,qwen3-4b,maven
     rams:
       label: RAMS
       raw_dir: data/rams_raw
@@ -77,9 +77,9 @@ data:
         reward_ckpt: /root/autodl-tmp/qwen-4b-rams-rm/reward.ckpt
         policy_output_dir: /root/autodl-tmp/qwen-4b-rams-rl
       wandb:
-        project: rams-irl
+        project: rams-ecpo
         sft_tags: sft,qwen3-4b,rams
-        ppo_tags: ppo,qwen3-4b,rams
+        ppo_tags: ecpo,qwen3-4b,rams
 
 datasets:
   MAVEN-ERE:
@@ -124,7 +124,7 @@ stats:
       - PREP
       - PROBE
       - EXECUTE
-      - CASHOUT
+      - OUTCOME
     datasets:
       - mode: maven
         label: MAVEN-ERE
@@ -198,7 +198,7 @@ stats:
           - fight
           - cyber
           - infiltrate
-        cashout:
+        outcome:
           - release
           - free
           - withdraw

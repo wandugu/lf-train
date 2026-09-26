@@ -1,30 +1,30 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-MODE_CONFIG="${ROOT_DIR}/skirl_rl/config.yaml"
-eval "$(python "${ROOT_DIR}/skirl_rl/scripts/resolve_mode_env.py" --config "${MODE_CONFIG}")"
+MODE_CONFIG="${ROOT_DIR}/ecpo_rl/config.yaml"
+eval "$(python "${ROOT_DIR}/ecpo_rl/scripts/resolve_mode_env.py" --config "${MODE_CONFIG}")"
 
-export WANDB_PROJECT="${SKIRL_WANDB_PROJECT}"
+export WANDB_PROJECT="${ECPO_WANDB_PROJECT}"
 export WANDB_MODE="online"              # offline/online
 # 可选：团队与标签
 # export WANDB_ENTITY="your_team"
-export WANDB_TAGS="${SKIRL_WANDB_SFT_TAGS}"
+export WANDB_TAGS="${ECPO_WANDB_SFT_TAGS}"
 # 可选：日志目录
 # export WANDB_DIR="$(pwd)/wandb"
 # 若之前离线过，这条会切回在线；失败不致命
 wandb online >/dev/null 2>&1 || true
 
-if [[ "${SKIRL_PRETRAIN_CONFIG}" = /* ]]; then
-  CONFIG_PATH="${SKIRL_PRETRAIN_CONFIG}"
+if [[ "${ECPO_PRETRAIN_CONFIG}" = /* ]]; then
+  CONFIG_PATH="${ECPO_PRETRAIN_CONFIG}"
 else
-  CONFIG_PATH="${ROOT_DIR}/${SKIRL_PRETRAIN_CONFIG}"
+  CONFIG_PATH="${ROOT_DIR}/${ECPO_PRETRAIN_CONFIG}"
 fi
 
-if [[ "${SKIRL_EXPORT_CONFIG}" = /* ]]; then
-  EXPORT_CONFIG="${SKIRL_EXPORT_CONFIG}"
+if [[ "${ECPO_EXPORT_CONFIG}" = /* ]]; then
+  EXPORT_CONFIG="${ECPO_EXPORT_CONFIG}"
 else
-  EXPORT_CONFIG="${ROOT_DIR}/${SKIRL_EXPORT_CONFIG}"
+  EXPORT_CONFIG="${ROOT_DIR}/${ECPO_EXPORT_CONFIG}"
 fi
 
 echo "$CONFIG_PATH"; test -f "$CONFIG_PATH"
@@ -34,7 +34,7 @@ cd "${ROOT_DIR}"
 
 # if [ ! -f "data/processed/maven_sft_train.jsonl" ]; then
   # echo "[INFO] 数据未找到，自动生成演示样本。"
-  # python skirl_rl/scripts/0_convert_maven_to_event_traj.py
+  # python ecpo_rl/scripts/0_convert_maven_to_event_traj.py
 # fi
 
 if [ ! -f "requirements.txt" ]; then
@@ -45,7 +45,7 @@ fi
 # python -m pip install --upgrade pip >/dev/null
 # python -m pip install -r requirements.txt
 
-echo "[INFO] 当前模式：${SKIRL_MODE}，启动 SFT 训练"
+echo "[INFO] 当前模式：${ECPO_MODE}，启动 SFT 训练"
 llamafactory-cli train "${CONFIG_PATH}"
 
 if [ -f "${EXPORT_CONFIG}" ]; then

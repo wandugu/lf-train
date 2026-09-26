@@ -1,15 +1,15 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-MODE_CONFIG="${ROOT_DIR}/skirl_rl/config.yaml"
-eval "$(python "${ROOT_DIR}/skirl_rl/scripts/resolve_mode_env.py" --config "${MODE_CONFIG}")"
+MODE_CONFIG="${ROOT_DIR}/ecpo_rl/config.yaml"
+eval "$(python "${ROOT_DIR}/ecpo_rl/scripts/resolve_mode_env.py" --config "${MODE_CONFIG}")"
 
-export WANDB_PROJECT="${WANDB_PROJECT:-${SKIRL_WANDB_PROJECT}}"
+export WANDB_PROJECT="${WANDB_PROJECT:-${ECPO_WANDB_PROJECT}}"
 export WANDB_MODE="${WANDB_MODE:-online}"              # offline/online
 # 可选：团队与标签
 # export WANDB_ENTITY="your_team"
-export WANDB_TAGS="${WANDB_TAGS:-${SKIRL_WANDB_PPO_TAGS}}"
+export WANDB_TAGS="${WANDB_TAGS:-${ECPO_WANDB_PPO_TAGS}}"
 
 # 默认开启 LlamaFactory DEBUG 日志，便于定位 PPO 生成异常（可通过外部环境变量覆盖）
 export LLAMAFACTORY_VERBOSITY="${LLAMAFACTORY_VERBOSITY:-DEBUG}"
@@ -18,18 +18,18 @@ export LLAMAFACTORY_VERBOSITY="${LLAMAFACTORY_VERBOSITY:-DEBUG}"
 export TRANSFORMERS_VERBOSITY="error"
 export TRANSFORMERS_NO_ADVISORY_WARNINGS="1"
 
-if [[ "${SKIRL_PPO_CONFIG}" = /* ]]; then
-  CONFIG_PATH="${SKIRL_PPO_CONFIG}"
+if [[ "${ECPO_PPO_CONFIG}" = /* ]]; then
+  CONFIG_PATH="${ECPO_PPO_CONFIG}"
 else
-  CONFIG_PATH="${ROOT_DIR}/${SKIRL_PPO_CONFIG}"
+  CONFIG_PATH="${ROOT_DIR}/${ECPO_PPO_CONFIG}"
 fi
 
-PROMPTS_PATH="${ROOT_DIR}/${SKIRL_PROCESSED_DIR}/${SKIRL_RL_PROMPTS_FILE}"
-REWARD_CKPT="${SKIRL_REWARD_CKPT}"
-OUTPUT_DIR="${SKIRL_POLICY_OUTPUT_DIR}"
+PROMPTS_PATH="${ROOT_DIR}/${ECPO_PROCESSED_DIR}/${ECPO_RL_PROMPTS_FILE}"
+REWARD_CKPT="${ECPO_REWARD_CKPT}"
+OUTPUT_DIR="${ECPO_POLICY_OUTPUT_DIR}"
 
 export PYTHONPATH="${ROOT_DIR}/src:${PYTHONPATH:-}"
-readarray -t __SKIRL_CONFIG_INFO < <(python - <<'PY' "${CONFIG_PATH}" "${ROOT_DIR}"
+readarray -t __ECPO_CONFIG_INFO < <(python - <<'PY' "${CONFIG_PATH}" "${ROOT_DIR}"
 import sys
 from pathlib import Path
 
@@ -52,9 +52,9 @@ print(config.get("run_name", ""))
 PY
 )
 
-MODEL_PATH="${__SKIRL_CONFIG_INFO[0]}"
-CONFIG_RUN_NAME="${__SKIRL_CONFIG_INFO[1]}"
-unset __SKIRL_CONFIG_INFO
+MODEL_PATH="${__ECPO_CONFIG_INFO[0]}"
+CONFIG_RUN_NAME="${__ECPO_CONFIG_INFO[1]}"
+unset __ECPO_CONFIG_INFO
 
 if [ -n "${CONFIG_RUN_NAME}" ] && [ -z "${WANDB_NAME:-}" ]; then
   export WANDB_NAME="${CONFIG_RUN_NAME}"
@@ -89,7 +89,7 @@ sys.exit(0 if importlib.util.find_spec("llamafactory") is not None else 1)
 PY
 }
 
-USE_OFFICIAL="${SKIRL_USE_OFFICIAL_PPO:-auto}"
+USE_OFFICIAL="${ECPO_USE_OFFICIAL_PPO:-auto}"
 SHOULD_USE_OFFICIAL=0
 
 case "${USE_OFFICIAL}" in
@@ -105,7 +105,7 @@ case "${USE_OFFICIAL}" in
     fi
     ;;
   *)
-    echo "[WARN] 未识别的 SKIRL_USE_OFFICIAL_PPO=${USE_OFFICIAL}，回退为 auto 检测"
+    echo "[WARN] 未识别的 ECPO_USE_OFFICIAL_PPO=${USE_OFFICIAL}，回退为 auto 检测"
     if has_llamafactory; then
       SHOULD_USE_OFFICIAL=1
     fi
@@ -120,7 +120,7 @@ if [ "${SHOULD_USE_OFFICIAL}" -eq 1 ]; then
   fi
 
   if [ ! -d "${MODEL_PATH}" ] && [ ! -f "${MODEL_PATH}/config.json" ]; then
-  echo "[ERROR] 未找到模型目录 ${MODEL_PATH}，请先完成 1_pretrain_qwen_maven.sh 或更新配置路径（mode=${SKIRL_MODE}）"
+  echo "[ERROR] 未找到模型目录 ${MODEL_PATH}，请先完成 1_pretrain_qwen_maven.sh 或更新配置路径（mode=${ECPO_MODE}）"
   exit 1
 fi
 
@@ -131,9 +131,11 @@ fi
   fi
 else
   echo "[WARN] 未检测到 LlamaFactory PPO 支持，使用启发式策略训练"
-  python skirl_rl/policy/rl_trainer.py \
+  python ecpo_rl/policy/rl_trainer.py \
     --reward-ckpt "${REWARD_CKPT}" \
+    --trajectory-path "${ROOT_DIR}/${ECPO_PROCESSED_DIR}/${ECPO_TRAJ_FILE}" \
     --prompts "${PROMPTS_PATH}" \
     --output-dir "${OUTPUT_DIR}" \
-    --alpha 0.6
+    --alpha 0.6 \
+    --k 10
 fi

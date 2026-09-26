@@ -30,19 +30,26 @@ logging_steps: 10
 save_steps: 200
 overwrite_output_dir: true
 
-# 奖励回调
+# ECPO 奖励回调：listwise ranking + certificate validity + evidence-cycle
 reward_model_type: callback
-reward_callback: skirl_maxent
+reward_callback: ecpo
 reward_callback_args:
   reward_ckpt: /root/autodl-tmp/qwen-4b-maven-rm/reward.ckpt
   trajectory_path: data/processed/traj.jsonl
-  alpha: 0.6
+  k: 10
+  gamma: 0.95
+  lambda_cert: 1.0
+  lambda_cycle: 1.0
+  invalid_penalty: 1.0
+  missing_penalty: 0.25
+  support_threshold: 0.35
+  support_margin: 0.05
   reward_clip:
     - -5.0
     - 5.0
 
 # wandb 设置（可改为 none 禁用）
 report_to: wandb
-run_name: maven_rl
-wandb_project: maven-irl
-wandb_tags: ppo,qwen3-4b,maven
+run_name: maven_ecpo
+wandb_project: maven-ecpo
+wandb_tags: ecpo,qwen3-4b,maven

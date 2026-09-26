@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Maximum entropy IRL trainer for SKIRL-RL demo."""
+"""Skeleton-conditioned trajectory reward trainer for ECPO."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence
+from typing import Dict, List, Sequence
 import numpy as np
 
 try:  # pragma: no cover - 可选依赖
@@ -28,14 +28,14 @@ def _wandb_run() -> "wandb.sdk.wandb_run.Run | None":  # type: ignore[name-defin
 
     try:
         run = wandb.init(  # type: ignore[attr-defined]
-            project="maven-irl",
+            project="maven-ecpo",
             config={
                 "learning_rate": 0.05,
                 "epochs": 150,
                 "batch_size": 32,
             },
             name="maven-rm",
-            tags=["rm training", "qwen3-4b", "maven"],
+            tags=["reward", "ecpo", "qwen3-4b", "maven"],
         )
     except Exception:  # noqa: BLE001 - wandb 初始化失败时静默降级
         run = None
@@ -232,7 +232,7 @@ def train(args: argparse.Namespace) -> None:
 
 
 def build_argparser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Train maximum entropy IRL reward model")
+    parser = argparse.ArgumentParser(description="Train ECPO trajectory reward model")
     parser.add_argument("--traj-path", type=Path, required=True)
     parser.add_argument("--pair-path", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)

@@ -40,6 +40,22 @@
 
 \[ English | [中文](README_zh.md) \]
 
+## ECPO Pipeline
+
+This repository includes an ECPO workflow for evidence-certified candidate ranking. ECPO trains a policy to emit a strict JSON joint object containing `topk` candidates and position-aligned evidence `certificates`, then scores outputs with listwise ranking utility, certificate validity, and evidence-cycle recovery.
+
+Quick entrypoints:
+
+```bash
+python ecpo_rl/scripts/0_convert_maven_to_event_traj.py
+python ecpo_rl/scripts/0_convert_rams_to_event_traj.py
+bash ecpo_rl/scripts/2_train_reward_maxent.sh
+bash ecpo_rl/scripts/3_train_policy_rl.sh
+python ecpo_rl/evaluate_ecpo.py
+```
+
+See [ecpo_rl/README.md](ecpo_rl/README.md) for the full ECPO data, training, reward-callback, and evaluation instructions.
+
 **Fine-tuning a large language model can be easy as...**
 
 https://github.com/user-attachments/assets/3991a3a8-4276-4d30-9cab-4cb0c4b9b99e

@@ -1,4 +1,4 @@
-"""Inverse reinforcement learning modules for SKIRL."""
+"""Trajectory reward-learning modules for ECPO."""
 
 from .maxent_irl import MaxEntIRL
 

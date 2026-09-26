@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
-"""Compute detailed statistics for converted SKEIN datasets."""
+﻿# -*- coding: utf-8 -*-
+"""Compute detailed statistics for converted ECPO datasets."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from skirl_rl.config_utils import load_config, resolve_mode, resolve_processed_files
+from ecpo_rl.config_utils import load_config, resolve_mode, resolve_processed_files
 
 LOGGER = logging.getLogger(__name__)
 
@@ -88,11 +88,13 @@ def _load_mapping(path: Path) -> Dict[str, Any]:
 def _normalize_stages(raw: Any) -> List[str]:
     stages: List[str] = []
     if isinstance(raw, str) and raw.strip():
-        stages.append(raw.strip().upper())
+        stage = raw.strip().upper()
+        stages.append("OUTCOME" if stage == "CASHOUT" else stage)
     elif isinstance(raw, list):
         for item in raw:
             if isinstance(item, str) and item.strip():
-                stages.append(item.strip().upper())
+                stage = item.strip().upper()
+                stages.append("OUTCOME" if stage == "CASHOUT" else stage)
     return stages
 
 
@@ -105,15 +107,15 @@ def _infer_fallback_stages(
     prep_keywords = keywords_cfg.get("prep", [])
     probe_keywords = keywords_cfg.get("probe", [])
     execute_keywords = keywords_cfg.get("execute", [])
-    cashout_keywords = keywords_cfg.get("cashout", [])
+    outcome_keywords = keywords_cfg.get("outcome", keywords_cfg.get("cashout", []))
     default_stage = str(fallback_cfg.get("default_stage", "PREP")).upper()
 
     event_type_lower = (event_type or "").lower()
     hits: List[str] = []
     if any(keyword in event_type_lower for keyword in execute_keywords):
         hits.append("EXECUTE")
-    if any(keyword in event_type_lower for keyword in cashout_keywords):
-        hits.append("CASHOUT")
+    if any(keyword in event_type_lower for keyword in outcome_keywords):
+        hits.append("OUTCOME")
     if any(keyword in event_type_lower for keyword in probe_keywords):
         hits.insert(0, "PROBE")
     if any(keyword in event_type_lower for keyword in prep_keywords):
@@ -606,11 +608,11 @@ def _build_json_schemas() -> Dict[str, Dict[str, Any]]:
         return payload
 
     return {
-        "traj": _wrap(trajectory_schema, "SKEIN Trajectory Record"),
-        "event": _wrap(event_schema, "SKEIN Event Record"),
-        "pairs": _wrap(pairs_schema, "SKEIN Preference Pair Record"),
-        "sft": _wrap(sft_schema, "SKEIN SFT Record"),
-        "rl_prompts": _wrap(rl_prompt_schema, "SKEIN RL Prompt Record"),
+        "traj": _wrap(trajectory_schema, "ECPO Trajectory Record"),
+        "event": _wrap(event_schema, "ECPO Event Record"),
+        "pairs": _wrap(pairs_schema, "ECPO Preference Pair Record"),
+        "sft": _wrap(sft_schema, "ECPO SFT Record"),
+        "rl_prompts": _wrap(rl_prompt_schema, "ECPO RL Prompt Record"),
     }
 
 
@@ -738,8 +740,8 @@ def _collect_examples(
 
 
 def build_argparser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="统计转换后的 SKEIN 数据集")
-    parser.add_argument("--config", type=Path, default=Path("skirl_rl/config.yaml"))
+    parser = argparse.ArgumentParser(description="统计转换后的 ECPO 数据集")
+    parser.add_argument("--config", type=Path, default=Path("ecpo_rl/config.yaml"))
     parser.add_argument("--dataset-dir", type=Path, default=None)
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--mode", type=str, default=None)
@@ -762,7 +764,7 @@ def main() -> None:
 
     stats_cfg = config.get("stats", {}) if isinstance(config.get("stats", {}), dict) else {}
     if not stats_cfg:
-        raise ValueError("missing stats config in skirl_rl/config.yaml")
+        raise ValueError("missing stats config in ecpo_rl/config.yaml")
 
     dataset_dir = _resolve_path(root, stats_cfg["dataset_dir"])
     if args.dataset_dir is not None:
