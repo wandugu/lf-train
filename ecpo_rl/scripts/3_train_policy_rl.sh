@@ -126,8 +126,6 @@ fi
 
   if command -v llamafactory-cli >/dev/null 2>&1; then
     llamafactory-cli train "${CONFIG_PATH}"
-  else
-    python -m llamafactory.cli train "${CONFIG_PATH}"
   fi
 else
   echo "[WARN] 未检测到 LlamaFactory PPO 支持，使用启发式策略训练"

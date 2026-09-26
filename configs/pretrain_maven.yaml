@@ -3,6 +3,7 @@ stage: sft
 
 dataset: maven_sft
 dataset_dir: data/processed/
+template: qwen
 output_dir: /root/autodl-tmp/qwen-4b-mypretrain
 
 do_train: true
